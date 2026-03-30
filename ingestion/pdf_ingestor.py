@@ -2,21 +2,12 @@ from pathlib import Path
 
 import chromadb
 import fitz  # PyMuPDF
-from sentence_transformers import SentenceTransformer
 
 from config import settings
 from utils.chunker import chunk_text
+from utils.embedder import get_embedder
 
-_embedder: SentenceTransformer | None = None
 _collection: chromadb.Collection | None = None
-
-
-def _get_embedder() -> SentenceTransformer:
-    """Lazily initialize and return the SentenceTransformer embedder."""
-    global _embedder
-    if _embedder is None:
-        _embedder = SentenceTransformer(settings.embed_model)
-    return _embedder
 
 
 def _get_collection() -> chromadb.Collection:
@@ -59,8 +50,7 @@ def ingest_pdf(filepath: str) -> dict:
     if not page_texts:
         return {"filename": path.name, "chunks_added": 0, "status": "no_text"}
 
-    # Initialize embedder and collection once, reuse for all chunks
-    embedder = _get_embedder()
+    embedder = get_embedder()
     collection = _get_collection()
 
     # Prepare data for upsert: generate unique IDs, chunk text, and create metadata
