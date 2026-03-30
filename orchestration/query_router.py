@@ -60,7 +60,7 @@ def _classify_by_llm(query: str) -> str:
             {
                 "role": "user",
                 "content": (
-                    """Classify this investment research question into exactly one of:
+                    f"""Classify this investment research question into exactly one of:
                     stock, macro, hybrid.
                     stock: asks about specific company metrics, prices, or financials
                     macro: asks about economic trends, rates, or sector-level themes
@@ -68,7 +68,7 @@ def _classify_by_llm(query: str) -> str:
 
                     Question: {query}
                     Reply with a single word: stock, macro, or hybrid.
-                    """.format(query=query)
+                    """
                 ),
             }
         ],
