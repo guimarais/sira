@@ -211,3 +211,7 @@ data/structured/*
 data/unstructured/*
 data/pdfs/*
 data/chroma/*
+data/stocks.db
+
+# Personal findings and notes
+LOG.md
