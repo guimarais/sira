@@ -62,6 +62,7 @@ async def query(body: QueryRequest) -> QueryResponse:
             body.question,
             routed["vector_results"],
             routed["sql_results"],
+            history=body.history,
         )
         return QueryResponse(
             answer=result["answer"],

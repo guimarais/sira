@@ -54,6 +54,7 @@ def build_response(
     query: str,
     vector_results: list[dict],
     sql_results: dict,
+    history: list | None = None,
 ) -> dict:
     """Synthesise a cited answer from PDF and SQL retrieval results via Claude.
 
@@ -71,10 +72,13 @@ def build_response(
     p = load_prompt("response_synthesis")
     user_content = p["user_template"].format(context=context, query=query)
 
+    messages = [{"role": m.role, "content": m.content} for m in (history or [])]
+    messages.append({"role": "user", "content": user_content})
+
     response = _get_client().messages.create(
         model=p["model"],
         max_tokens=p["max_tokens"],
-        messages=[{"role": "user", "content": user_content}],
+        messages=messages,
     )
 
     return {"answer": response.content[0].text.strip(), "sources": sources}
