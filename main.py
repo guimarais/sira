@@ -7,9 +7,10 @@ import fitz
 from fastapi import FastAPI, HTTPException, Query, UploadFile
 
 from config import settings
-from ingestion.csv_ingestor import ingest_csv
-from ingestion.pdf_ingestor import ingest_pdf
+from ingestion.csv_ingestor import delete_stocks, ingest_csv
+from ingestion.pdf_ingestor import delete_pdf, ingest_pdf
 from ingestion.xlsx_ingestor import ingest_xlsx
+from utils.db import get_connection
 from models.schemas import IngestResponse, QueryRequest, QueryResponse
 from orchestration.query_router import route_query
 from synthesis.response_builder import build_response
@@ -141,3 +142,29 @@ async def upload_xlsx(
         Path(tmp_path).unlink(missing_ok=True)
 
     return IngestResponse(status="ok", detail=detail)
+
+
+@app.delete("/documents/{filename}")
+async def delete_document(filename: str) -> dict:
+    """Remove a document and all its data from the vector store and registry."""
+    con = get_connection()
+    try:
+        row = con.execute(
+            "SELECT type FROM documents WHERE filename = ?", (filename,)
+        ).fetchone()
+    finally:
+        con.close()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Document '{filename}' not found.")
+
+    doc_type = row[0]
+    try:
+        if doc_type == "pdf":
+            delete_pdf(filename)
+        else:
+            delete_stocks()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"filename": filename, "status": "deleted"}

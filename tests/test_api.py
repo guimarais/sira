@@ -168,3 +168,42 @@ def test_upload_csv_server_error(valid_csv_bytes):
             files={"file": ("stocks.csv", valid_csv_bytes, "text/csv")},
         )
     assert r.status_code == 500
+
+
+# --- DELETE /documents/{filename} ---
+
+def _mock_con(doc_type):
+    """Return a mock SQLite connection that returns (doc_type,) for fetchone."""
+    from unittest.mock import MagicMock
+    con = MagicMock()
+    con.execute.return_value.fetchone.return_value = (doc_type,) if doc_type else None
+    return con
+
+
+def test_delete_pdf_document():
+    with (
+        patch("main.get_connection", return_value=_mock_con("pdf")),
+        patch("main.delete_pdf", return_value={"filename": "report.pdf", "chunks_deleted": 5, "status": "deleted"}),
+    ):
+        r = client.delete("/documents/report.pdf")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "deleted"
+    assert body["filename"] == "report.pdf"
+
+
+def test_delete_csv_document():
+    with (
+        patch("main.get_connection", return_value=_mock_con("csv")),
+        patch("main.delete_stocks", return_value={"status": "deleted"}),
+    ):
+        r = client.delete("/documents/stocks.csv")
+    assert r.status_code == 200
+    assert r.json()["status"] == "deleted"
+
+
+def test_delete_document_not_found():
+    with patch("main.get_connection", return_value=_mock_con(None)):
+        r = client.delete("/documents/missing.pdf")
+    assert r.status_code == 404
+    assert "not found" in r.json()["detail"].lower()

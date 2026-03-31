@@ -68,3 +68,21 @@ def ingest_csv(filepath: str) -> dict:
         con.close()
 
     return {"rows_inserted": len(df), "columns": columns, "status": "ok"}
+
+
+def delete_stocks() -> dict:
+    """Drop the stocks and metadata tables and remove the CSV registry entry.
+
+    Returns:
+        dict with keys: status.
+    """
+    con = get_connection()
+    try:
+        con.execute("DROP TABLE IF EXISTS stocks")
+        con.execute("DROP TABLE IF EXISTS metadata")
+        con.execute("DELETE FROM documents WHERE type = 'csv'")
+        con.commit()
+    finally:
+        con.close()
+
+    return {"status": "deleted"}
