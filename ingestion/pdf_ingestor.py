@@ -23,7 +23,7 @@ def _get_collection() -> chromadb.Collection:
     return _collection
 
 
-def ingest_pdf(filepath: str) -> dict:
+def ingest_pdf(filepath: str, original_filename: str | None = None) -> dict:
     """Extract text from a PDF, chunk it, embed it, and upsert to ChromaDB.
 
     Also records the document and each chunk in the SQLite registry so they
@@ -39,6 +39,7 @@ def ingest_pdf(filepath: str) -> dict:
         fitz.FileDataError: If the file is not a valid PDF.
     """
     path = Path(filepath)
+    display_name = Path(original_filename).name if original_filename else path.name
 
     try:
         doc = fitz.open(filepath)
@@ -54,7 +55,7 @@ def ingest_pdf(filepath: str) -> dict:
     doc.close()
 
     if not page_texts:
-        return {"filename": path.name, "chunks_added": 0, "status": "no_text"}
+        return {"filename": display_name, "chunks_added": 0, "status": "no_text"}
 
     embedder = get_embedder()
     collection = _get_collection()
@@ -69,10 +70,10 @@ def ingest_pdf(filepath: str) -> dict:
     for page_num, text in page_texts:
         chunks = chunk_text(text, chunk_size=500, overlap=50)
         for chunk_idx, chunk in enumerate(chunks):
-            chunk_id = f"{path.stem}_p{page_num}_c{chunk_idx}"
+            chunk_id = f"{Path(display_name).stem}_p{page_num}_c{chunk_idx}"
             ids.append(chunk_id)
             texts.append(chunk)
-            metadatas.append({"source": path.name, "page": page_num})
+            metadatas.append({"source": display_name, "page": page_num})
             chunk_records.append((chunk_id, page_num, chunk_idx))
 
     embeddings = embedder.encode(texts, show_progress_bar=False).tolist()
@@ -92,10 +93,10 @@ def ingest_pdf(filepath: str) -> dict:
         con.execute(
             "INSERT OR REPLACE INTO documents (filename, type, ingested_at, chunks_count)"
             " VALUES (?, 'pdf', ?, ?)",
-            (path.name, now, len(ids)),
+            (display_name, now, len(ids)),
         )
         doc_id = con.execute(
-            "SELECT id FROM documents WHERE filename = ?", (path.name,)
+            "SELECT id FROM documents WHERE filename = ?", (display_name,)
         ).fetchone()[0]
         con.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
         con.executemany(
@@ -107,7 +108,7 @@ def ingest_pdf(filepath: str) -> dict:
         con.close()
 
     invalidate_bm25()
-    return {"filename": path.name, "chunks_added": len(ids), "status": "ok"}
+    return {"filename": display_name, "chunks_added": len(ids), "status": "ok"}
 
 
 def delete_pdf(filename: str) -> dict:

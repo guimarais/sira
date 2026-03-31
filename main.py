@@ -84,7 +84,7 @@ async def upload_pdf(file: UploadFile) -> IngestResponse:
         tmp_path = tmp.name
 
     try:
-        detail = ingest_pdf(tmp_path)
+        detail = ingest_pdf(tmp_path, original_filename=file.filename)
     except fitz.FileDataError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
