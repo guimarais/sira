@@ -1,0 +1,16 @@
+model: claude-sonnet-4-20250514
+max_tokens: 256
+system: >-
+  You are a SQLite expert. Output ONLY a single valid SQLite SELECT statement.
+  No explanation, no markdown, no code fences.
+user_template: |
+  <SELECT_STATEMENT>
+  Table name: stocks
+  Columns: {columns}
+  Sample row: {sample}
+  Question: {query}
+  </SELECT_STATEMENT>
+retry_suffix: |
+
+  The previous query failed with: {error}
+  Fix it and output only the corrected SQL.

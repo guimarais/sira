@@ -122,7 +122,7 @@ def test_retrieve_structured_returns_correct_shape(stocks_db):
 def test_retrieve_structured_retries_on_bad_sql(stocks_db):
     call_count = 0
 
-    def mock_generate(prompt):
+    def mock_generate(user_content, system=None):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
