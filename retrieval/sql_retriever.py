@@ -110,15 +110,17 @@ def retrieve_structured(query: str) -> dict:
         return {"sql_generated": "", "rows": [], "error": str(exc)}
 
     prompt = _build_prompt(query, columns, sample)
+    sql = ""
 
     # First attempt
+    first_error: Exception | None = None
     try:
         sql = _generate_sql(prompt)
         _validate_sql(sql)
         rows = _execute_sql(sql)
         return {"sql_generated": sql, "rows": rows, "error": None}
-    except (sqlite3.OperationalError, ValueError) as first_error:
-        pass
+    except (sqlite3.OperationalError, ValueError) as exc:
+        first_error = exc
 
     # Single retry with error context
     retry_prompt = _build_prompt(query, columns, sample, error=str(first_error))
