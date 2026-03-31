@@ -1,10 +1,11 @@
 import re
-import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from config import settings
+from utils.db import get_connection
 
 
 def _sanitize_column(name: str) -> str:
@@ -15,10 +16,10 @@ def _sanitize_column(name: str) -> str:
 def ingest_csv(filepath: str) -> dict:
     """Load a CSV file into the SQLite `stocks` table.
 
-    Drops and recreates the table on each call so the schema always matches
-    the uploaded file. Column names from the CSV are sanitised (lowercase,
-    underscores). A `metadata` table stores the column list for use by the
-    text-to-SQL retriever.
+    Drops and recreates the stocks and metadata tables on each call so the
+    schema always matches the uploaded file. Also records the document in the
+    SQLite registry. Column names from the CSV are sanitised (lowercase,
+    underscores).
 
     Args:
         filepath: Absolute or relative path to the CSV file.
@@ -43,7 +44,8 @@ def ingest_csv(filepath: str) -> dict:
     df.columns = [_sanitize_column(c) for c in df.columns]
     columns = list(df.columns)
 
-    con = sqlite3.connect(settings.sqlite_path)
+    now = datetime.now(timezone.utc).isoformat()
+    con = get_connection()
     try:
         con.execute("DROP TABLE IF EXISTS stocks")
         con.execute("DROP TABLE IF EXISTS metadata")
@@ -55,8 +57,32 @@ def ingest_csv(filepath: str) -> dict:
             "INSERT INTO metadata VALUES (?, ?)",
             ("columns", ",".join(columns)),
         )
+
+        con.execute(
+            "INSERT OR REPLACE INTO documents (filename, type, ingested_at, chunks_count)"
+            " VALUES (?, 'csv', ?, 0)",
+            (path.name, now),
+        )
         con.commit()
     finally:
         con.close()
 
     return {"rows_inserted": len(df), "columns": columns, "status": "ok"}
+
+
+def delete_stocks() -> dict:
+    """Drop the stocks and metadata tables and remove the CSV registry entry.
+
+    Returns:
+        dict with keys: status.
+    """
+    con = get_connection()
+    try:
+        con.execute("DROP TABLE IF EXISTS stocks")
+        con.execute("DROP TABLE IF EXISTS metadata")
+        con.execute("DELETE FROM documents WHERE type = 'csv'")
+        con.commit()
+    finally:
+        con.close()
+
+    return {"status": "deleted"}

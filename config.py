@@ -17,10 +17,12 @@ class Settings(BaseSettings):
     top_k: int = 5
 
     def ensure_dirs(self) -> None:
-        """Create data directories if they don't exist."""
+        """Create data directories and initialize SQLite schema if needed."""
         for path in (self.chroma_persist_dir, self.pdf_folder):
             Path(path).mkdir(parents=True, exist_ok=True)
         Path(self.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+        from utils.db import ensure_schema  # local import avoids circular dependency
+        ensure_schema()
 
 
 settings = Settings()

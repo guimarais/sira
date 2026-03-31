@@ -1,5 +1,6 @@
 import csv
 import sqlite3
+from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
 import fitz
@@ -50,6 +51,20 @@ def empty_csv(tmp_path):
     return str(path)
 
 
+def _enter_pdf_patches(stack, tmp_path, mock_embedder, mock_collection):
+    """Apply the standard set of patches for PDF ingestion tests via an ExitStack.
+    Returns the mock_chroma object."""
+    stack.enter_context(patch("utils.embedder._embedder", None))
+    stack.enter_context(patch("utils.embedder.SentenceTransformer", return_value=mock_embedder))
+    stack.enter_context(patch("ingestion.pdf_ingestor._collection", None))
+    stack.enter_context(patch("ingestion.pdf_ingestor.settings.chroma_persist_dir", str(tmp_path)))
+    stack.enter_context(patch("ingestion.pdf_ingestor.settings.sqlite_path", str(tmp_path / "test.db")))
+    stack.enter_context(patch("utils.db.settings.sqlite_path", str(tmp_path / "test.db")))
+    mock_chroma = stack.enter_context(patch("chromadb.PersistentClient"))
+    mock_chroma.return_value.get_or_create_collection.return_value = mock_collection
+    return mock_chroma
+
+
 # --- PDF ingestion ---
 
 def test_ingest_pdf_chunk_count(pdf_2pages, tmp_path):
@@ -57,14 +72,8 @@ def test_ingest_pdf_chunk_count(pdf_2pages, tmp_path):
     mock_embedder.encode.return_value = np.zeros((20, 384))
     mock_collection = MagicMock()
 
-    with (
-        patch("utils.embedder._embedder", None),
-        patch("utils.embedder.SentenceTransformer", return_value=mock_embedder),
-        patch("ingestion.pdf_ingestor._collection", None),
-        patch("ingestion.pdf_ingestor.settings.chroma_persist_dir", str(tmp_path)),
-        patch("chromadb.PersistentClient") as mock_chroma,
-    ):
-        mock_chroma.return_value.get_or_create_collection.return_value = mock_collection
+    with ExitStack() as stack:
+        _enter_pdf_patches(stack, tmp_path, mock_embedder, mock_collection)
         from ingestion.pdf_ingestor import ingest_pdf
         result = ingest_pdf(pdf_2pages)
 
@@ -81,14 +90,8 @@ def test_ingest_pdf_metadata_has_page_numbers(pdf_2pages, tmp_path):
     mock_embedder.encode.return_value = np.zeros((20, 384))
     mock_collection = MagicMock()
 
-    with (
-        patch("utils.embedder._embedder", None),
-        patch("utils.embedder.SentenceTransformer", return_value=mock_embedder),
-        patch("ingestion.pdf_ingestor._collection", None),
-        patch("ingestion.pdf_ingestor.settings.chroma_persist_dir", str(tmp_path)),
-        patch("chromadb.PersistentClient") as mock_chroma,
-    ):
-        mock_chroma.return_value.get_or_create_collection.return_value = mock_collection
+    with ExitStack() as stack:
+        _enter_pdf_patches(stack, tmp_path, mock_embedder, mock_collection)
         from ingestion.pdf_ingestor import ingest_pdf
         ingest_pdf(pdf_2pages)
 
@@ -98,6 +101,26 @@ def test_ingest_pdf_metadata_has_page_numbers(pdf_2pages, tmp_path):
     assert all("source" in m for m in metadatas)
 
 
+def test_ingest_pdf_writes_registry(pdf_2pages, tmp_path):
+    mock_embedder = MagicMock()
+    mock_embedder.encode.return_value = np.zeros((20, 384))
+    mock_collection = MagicMock()
+    db_path = str(tmp_path / "test.db")
+
+    with ExitStack() as stack:
+        _enter_pdf_patches(stack, tmp_path, mock_embedder, mock_collection)
+        from ingestion.pdf_ingestor import ingest_pdf
+        result = ingest_pdf(pdf_2pages)
+
+    con = sqlite3.connect(db_path)
+    doc_row = con.execute("SELECT filename, type, chunks_count FROM documents").fetchone()
+    chunk_count = con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    con.close()
+
+    assert doc_row == ("macro.pdf", "pdf", result["chunks_added"])
+    assert chunk_count == result["chunks_added"]
+
+
 def test_ingest_pdf_corrupt_raises(corrupt_pdf):
     with pytest.raises(fitz.FileDataError):
         from ingestion.pdf_ingestor import ingest_pdf
@@ -105,7 +128,6 @@ def test_ingest_pdf_corrupt_raises(corrupt_pdf):
 
 
 def test_ingest_pdf_no_text_returns_no_text_status(tmp_path):
-    # PDF with no extractable text (image-only page)
     doc = fitz.open()
     doc.new_page()  # blank page, no text
     path = tmp_path / "blank.pdf"
@@ -122,7 +144,10 @@ def test_ingest_pdf_no_text_returns_no_text_status(tmp_path):
 
 def test_ingest_csv_row_and_column_count(csv_5rows, tmp_path):
     db_path = str(tmp_path / "test.db")
-    with patch("ingestion.csv_ingestor.settings.sqlite_path", db_path):
+    with (
+        patch("ingestion.csv_ingestor.settings.sqlite_path", db_path),
+        patch("utils.db.settings.sqlite_path", db_path),
+    ):
         from ingestion.csv_ingestor import ingest_csv
         result = ingest_csv(csv_5rows)
 
@@ -133,12 +158,14 @@ def test_ingest_csv_row_and_column_count(csv_5rows, tmp_path):
 
 def test_ingest_csv_column_sanitization(csv_5rows, tmp_path):
     db_path = str(tmp_path / "test.db")
-    with patch("ingestion.csv_ingestor.settings.sqlite_path", db_path):
+    with (
+        patch("ingestion.csv_ingestor.settings.sqlite_path", db_path),
+        patch("utils.db.settings.sqlite_path", db_path),
+    ):
         from ingestion.csv_ingestor import ingest_csv
         result = ingest_csv(csv_5rows)
 
     cols = result["columns"]
-    # "Price (USD)" → "price_usd", "P/E Ratio" → "p_e_ratio", etc.
     assert "price_usd" in cols
     assert "p_e_ratio" in cols
     assert "market_cap_b" in cols
@@ -148,7 +175,10 @@ def test_ingest_csv_column_sanitization(csv_5rows, tmp_path):
 
 def test_ingest_csv_data_written_to_sqlite(csv_5rows, tmp_path):
     db_path = str(tmp_path / "test.db")
-    with patch("ingestion.csv_ingestor.settings.sqlite_path", db_path):
+    with (
+        patch("ingestion.csv_ingestor.settings.sqlite_path", db_path),
+        patch("utils.db.settings.sqlite_path", db_path),
+    ):
         from ingestion.csv_ingestor import ingest_csv
         ingest_csv(csv_5rows)
 
@@ -161,9 +191,28 @@ def test_ingest_csv_data_written_to_sqlite(csv_5rows, tmp_path):
     assert "ticker" in cols_meta
 
 
+def test_ingest_csv_writes_registry(csv_5rows, tmp_path):
+    db_path = str(tmp_path / "test.db")
+    with (
+        patch("ingestion.csv_ingestor.settings.sqlite_path", db_path),
+        patch("utils.db.settings.sqlite_path", db_path),
+    ):
+        from ingestion.csv_ingestor import ingest_csv
+        ingest_csv(csv_5rows)
+
+    con = sqlite3.connect(db_path)
+    doc_row = con.execute("SELECT filename, type, chunks_count FROM documents").fetchone()
+    con.close()
+
+    assert doc_row == ("stocks.csv", "csv", 0)
+
+
 def test_ingest_csv_empty_raises(empty_csv, tmp_path):
     db_path = str(tmp_path / "test.db")
-    with patch("ingestion.csv_ingestor.settings.sqlite_path", db_path):
+    with (
+        patch("ingestion.csv_ingestor.settings.sqlite_path", db_path),
+        patch("utils.db.settings.sqlite_path", db_path),
+    ):
         from ingestion.csv_ingestor import ingest_csv
         with pytest.raises(ValueError, match="empty"):
             ingest_csv(empty_csv)

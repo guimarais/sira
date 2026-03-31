@@ -1,0 +1,10 @@
+model: claude-sonnet-4-20250514
+max_tokens: 10
+user_template: |
+  Classify this investment research question into exactly one of: stock, macro, hybrid.
+  - stock: asks about specific company metrics, prices, or financials
+  - macro: asks about economic trends, rates, or sector-level themes
+  - hybrid: requires both company data and macro context
+
+  Question: {query}
+  Reply with a single word: stock, macro, or hybrid.

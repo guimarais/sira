@@ -4,6 +4,7 @@ Module for synthesising a cited natural-language answer from retrieval results.
 import anthropic
 
 from config import settings
+from utils.prompt_loader import load_prompt
 
 _client: anthropic.Anthropic | None = None
 
@@ -53,6 +54,7 @@ def build_response(
     query: str,
     vector_results: list[dict],
     sql_results: dict,
+    history: list | None = None,
 ) -> dict:
     """Synthesise a cited answer from PDF and SQL retrieval results via Claude.
 
@@ -67,21 +69,16 @@ def build_response(
             sources (list[str]): All cited sources referenced in the answer.
     """
     context, sources = _build_context(vector_results, sql_results)
+    p = load_prompt("response_synthesis")
+    user_content = p["user_template"].format(context=context, query=query)
 
-    prompt = (
-        f"""You are an investment research assistant. Answer the question below using
-        only the provided context. Cite every claim inline using the source tags
-        exactly as they appear in the context (e.g. [Source: report.pdf, p.3] or
-        [Source: stocks table, SQL: SELECT ...]).
-        If the context does not contain enough information, say so explicitly.
-        Context:\n{context}
-        Question: {query}"""
-    )
+    messages = [{"role": m.role, "content": m.content} for m in (history or [])]
+    messages.append({"role": "user", "content": user_content})
 
     response = _get_client().messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
+        model=p["model"],
+        max_tokens=p["max_tokens"],
+        messages=messages,
     )
 
     return {"answer": response.content[0].text.strip(), "sources": sources}
