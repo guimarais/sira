@@ -28,7 +28,10 @@ def _get_schema() -> tuple[str, str]:
     """Return (comma-separated column names, one sample row as string)."""
     con = sqlite3.connect(settings.sqlite_path)
     try:
-        row = con.execute("SELECT value FROM metadata WHERE key='columns'").fetchone()
+        try:
+            row = con.execute("SELECT value FROM metadata WHERE key='columns'").fetchone()
+        except sqlite3.OperationalError:
+            raise RuntimeError("No stocks table found. Upload a CSV first.")
         if row is None:
             raise RuntimeError("No stocks table found. Upload a CSV first.")
         columns = row[0]
