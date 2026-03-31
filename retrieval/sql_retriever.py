@@ -3,9 +3,11 @@ Module for retrieving structured stock data via LLM-generated SQL queries.
 """
 import re
 import sqlite3
+
 import anthropic
 
 from config import settings
+from utils.prompt_loader import load_prompt
 
 # Only SELECT statements are permitted — block any mutation or DDL.
 _SAFE_SQL_RE = re.compile(r"^\s*SELECT\b", re.IGNORECASE)
@@ -43,25 +45,6 @@ def _get_schema() -> tuple[str, str]:
     return columns, sample
 
 
-def _build_prompt(query: str, columns: str, sample: str, error: str | None = None) -> str:
-    prompt = (
-        """
-        You are a SQLite expert. Output ONLY a single valid SQLite SELECT statement.
-        No explanation, no markdown, no code fences.
-
-        <SELECT_STATEMENT>
-        Table name: stocks
-        Columns: {columns}
-        Sample row: {sample}
-        Question: {query}
-        </SELECT_STATEMENT>
-        """
-    )
-    if error:
-        prompt += f"\n\nThe previous query failed with: {error}\nFix it and output only the corrected SQL."
-    return prompt
-
-
 def _validate_sql(sql: str) -> None:
     """Raise ValueError if the SQL contains dangerous statements."""
     if not _SAFE_SQL_RE.match(sql):
@@ -70,13 +53,17 @@ def _validate_sql(sql: str) -> None:
         raise ValueError(f"Generated SQL contains forbidden keywords: {sql!r}")
 
 
-def _generate_sql(prompt: str) -> str:
+def _generate_sql(user_content: str, system: str | None = None) -> str:
     """Call Claude and return the raw SQL string."""
-    response = _get_client().messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=256,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    p = load_prompt("sql_generation")
+    kwargs: dict = {
+        "model": p["model"],
+        "max_tokens": p["max_tokens"],
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    if system:
+        kwargs["system"] = system
+    response = _get_client().messages.create(**kwargs)
     return response.content[0].text.strip()
 
 
@@ -112,23 +99,26 @@ def retrieve_structured(query: str) -> dict:
     except RuntimeError as exc:
         return {"sql_generated": "", "rows": [], "error": str(exc)}
 
-    prompt = _build_prompt(query, columns, sample)
+    p = load_prompt("sql_generation")
+    user_content = p["user_template"].format(columns=columns, sample=sample, query=query)
+    system = p.get("system")
     sql = ""
 
     # First attempt
     first_error: Exception | None = None
     try:
-        sql = _generate_sql(prompt)
+        sql = _generate_sql(user_content, system=system)
         _validate_sql(sql)
         rows = _execute_sql(sql)
         return {"sql_generated": sql, "rows": rows, "error": None}
     except (sqlite3.OperationalError, ValueError) as exc:
         first_error = exc
 
-    # Single retry with error context
-    retry_prompt = _build_prompt(query, columns, sample, error=str(first_error))
+    # Single retry — append error context using retry_suffix from the prompt config
+    retry_suffix = p.get("retry_suffix", "")
+    retry_content = user_content + retry_suffix.format(error=str(first_error))
     try:
-        sql = _generate_sql(retry_prompt)
+        sql = _generate_sql(retry_content, system=system)
         _validate_sql(sql)
         rows = _execute_sql(sql)
         return {"sql_generated": sql, "rows": rows, "error": None}

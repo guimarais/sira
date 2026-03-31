@@ -9,6 +9,7 @@ import anthropic
 from config import settings
 from retrieval.sql_retriever import retrieve_structured
 from retrieval.vector_retriever import retrieve_chunks
+from utils.prompt_loader import load_prompt
 
 # Keywords that strongly suggest structured stock data queries
 _STOCK_KEYWORDS = re.compile(
@@ -53,25 +54,11 @@ def _classify_by_keywords(query: str) -> str | None:
 def _classify_by_llm(query: str) -> str:
     """Ask Claude to classify the intent. Returns 'stock', 'macro', or 'hybrid'."""
     try:
+        p = load_prompt("query_classification")
         response = _get_client().messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=10,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"""Classify this investment research question into exactly one of:
-                        stock, macro, hybrid.
-                        stock: asks about specific company metrics, prices, or financials
-                        macro: asks about economic trends, rates, or sector-level themes
-                        hybrid: requires both company data and macro context
-
-                        Question: {query}
-                        Reply with a single word: stock, macro, or hybrid.
-                        """
-                    ),
-                }
-            ],
+            model=p["model"],
+            max_tokens=p["max_tokens"],
+            messages=[{"role": "user", "content": p["user_template"].format(query=query)}],
         )
         label = response.content[0].text.strip().lower()
         return label if label in ("stock", "macro", "hybrid") else "hybrid"
