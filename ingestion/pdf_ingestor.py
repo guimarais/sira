@@ -106,3 +106,32 @@ def ingest_pdf(filepath: str) -> dict:
         con.close()
 
     return {"filename": path.name, "chunks_added": len(ids), "status": "ok"}
+
+
+def delete_pdf(filename: str) -> dict:
+    """Remove all ChromaDB chunks and registry records for a PDF document.
+
+    Args:
+        filename: The exact filename as stored in the documents registry.
+
+    Returns:
+        dict with keys: filename, chunks_deleted, status.
+    """
+    collection = _get_collection()
+
+    # Count before deletion so we can report how many were removed
+    existing = collection.get(where={"source": filename}, include=[])
+    chunks_deleted = len(existing["ids"])
+
+    if chunks_deleted:
+        collection.delete(where={"source": filename})
+
+    # Delete the documents row; chunks rows cascade via FK
+    con = get_connection()
+    try:
+        con.execute("DELETE FROM documents WHERE filename = ?", (filename,))
+        con.commit()
+    finally:
+        con.close()
+
+    return {"filename": filename, "chunks_deleted": chunks_deleted, "status": "deleted"}
