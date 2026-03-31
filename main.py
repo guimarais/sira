@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import fitz
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 
 from config import settings
 from ingestion.csv_ingestor import ingest_csv
 from ingestion.pdf_ingestor import ingest_pdf
+from ingestion.xlsx_ingestor import ingest_xlsx
 from models.schemas import IngestResponse, QueryRequest, QueryResponse
 from orchestration.query_router import route_query
 from synthesis.response_builder import build_response
@@ -104,6 +105,34 @@ async def upload_csv(file: UploadFile) -> IngestResponse:
 
     try:
         detail = ingest_csv(tmp_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    return IngestResponse(status="ok", detail=detail)
+
+
+@app.post("/upload-xlsx", response_model=IngestResponse)
+async def upload_xlsx(
+    file: UploadFile,
+    sheet: str = Query(default="0", description="Sheet name or zero-based index"),
+) -> IngestResponse:
+    """Ingest one sheet of an XLSX file into the stocks SQLite table."""
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="File must be an XLSX.")
+
+    # Accept numeric index ("0", "1") or sheet name ("Sheet1")
+    sheet_arg: str | int = int(sheet) if sheet.isdigit() else sheet
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False, mode="wb") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    try:
+        detail = ingest_xlsx(tmp_path, sheet=sheet_arg)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
