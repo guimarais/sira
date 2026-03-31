@@ -5,6 +5,7 @@ import chromadb
 import fitz  # PyMuPDF
 
 from config import settings
+from retrieval.vector_retriever import invalidate_bm25
 from utils.chunker import chunk_text
 from utils.db import get_connection
 from utils.embedder import get_embedder
@@ -105,6 +106,7 @@ def ingest_pdf(filepath: str) -> dict:
     finally:
         con.close()
 
+    invalidate_bm25()
     return {"filename": path.name, "chunks_added": len(ids), "status": "ok"}
 
 
@@ -134,4 +136,5 @@ def delete_pdf(filename: str) -> dict:
     finally:
         con.close()
 
+    invalidate_bm25()
     return {"filename": filename, "chunks_deleted": chunks_deleted, "status": "deleted"}
